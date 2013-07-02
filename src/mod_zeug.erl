@@ -27,20 +27,46 @@
 	terminate/2, code_change/3
 ]).
 
-start(_Host, _Opts) ->
-	ok.
+start(Host, Opts) ->
+	ejabberd_hooks:add(user_send_packet, Host, ?MODULE, log_packet_send, 55),
+	Proc = gen_mod:get_module_proc(Host, ?MODULE),
 
-stop(_Host) ->
-	ok.
+	ChildSpec =
+			{Proc,
+				{?MODULE, start_link, [Host, Opts]},
+				transient,
+				50,
+				worker,
+				[?MODULE]},
+	supervisor:start_child(ejabberd_sup, ChildSpec).
+
+stop(Host) ->
+	ejabberd_hooks:delete(user_send_packet, Host,
+		?MODULE, log_packet_send, 55),
+	Proc = gen_mod:get_module_proc(Host, ?MODULE),
+	gen_server:call(Proc, stop),
+	supervisor:delete_child(ejabberd_sup, Proc).
 
 start_link(_Host, _Opts) ->
 	ok.
 
 init([_Host, _Opts]) ->
-	ok.
+	?INFO_MSG("Starting ~p", [?MODULE]),
+
+	State = {},
+
+	{ok, State}.
+
+log_packet_send(From, To, Packet) ->
+	Proc = gen_mod:get_module_proc(From#jid.lserver, ?MODULE),
+	gen_server:cast(Proc, {log_packet, From, To, Packet}).
 
 handle_call(stop, _From, State) ->
 	{stop, normal, State}.
+
+handle_cast({log_packet, From, To, Packet}, State) ->
+	?DEBUG("Packet received:~nFrom: ~s~nTo: ~s~nPacket: ~p", [From, To, Packet]),
+	{noreply, State};
 
 handle_cast(_Msg, State) ->
 	{noreply, State}.
